@@ -40,53 +40,74 @@ export async function runMonitor(env: Env): Promise<{
   alertsSent: number;
   results: string[];
 }> {
-  const results: string[] = [];
-  let alertsSent = 0;
+  const productResults = await Promise.all(
+    PRODUCTS.map(async (product) => {
+      const stateKey = `product:${product.model}`;
+      try {
+        const offers = await collectOffers(product);
+        if (!offers.length) {
+          return {
+            line: `${product.name}: nenhuma oferta encontrada`,
+            alerted: false,
+            stateKey,
+            state: null as ProductState | null,
+          };
+        }
 
-  for (const product of PRODUCTS) {
-    const stateKey = `product:${product.model}`;
-    const offers = await collectOffers(product);
+        const best = offers[0];
+        const stored = await loadProductState(env.STATE_KV, stateKey);
+        const decision = decideAlert(best.price, product.maxPrice, stored);
+        const updated = nextState(best.price, stored, decision.shouldAlert);
+        await saveProductState(env.STATE_KV, stateKey, updated);
 
-    if (!offers.length) {
-      results.push(`${product.name}: nenhuma oferta encontrada`);
-      continue;
-    }
+        if (!decision.shouldAlert) {
+          return {
+            line: `${product.name}: ${formatMoney(best.price)} (${decision.reason})`,
+            alerted: false,
+            stateKey,
+            state: updated,
+          };
+        }
 
-    const best = offers[0];
-    const stored = await loadProductState(env.STATE_KV, stateKey);
-    const decision = decideAlert(best.price, product.maxPrice, stored);
+        const message = buildAlertMessage({
+          productName: product.name,
+          model: product.model,
+          maxPrice: product.maxPrice,
+          offerTitle: best.title,
+          offerStore: best.store,
+          offerPrice: best.price,
+          offerUrl: best.url,
+          previousMin: decision.previousMin,
+        });
 
-    results.push(
-      `${product.name}: ${formatMoney(best.price)} (${decision.reason})`,
-    );
+        await sendTelegram(
+          env.TELEGRAM_BOT_TOKEN,
+          env.TELEGRAM_CHAT_ID,
+          message,
+        );
 
-    const updated = nextState(best.price, stored, decision.shouldAlert);
-    await saveProductState(env.STATE_KV, stateKey, updated);
+        return {
+          line: `${product.name}: ${formatMoney(best.price)} (alerta enviado)`,
+          alerted: true,
+          stateKey,
+          state: updated,
+        };
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error);
+        return {
+          line: `${product.name}: erro (${reason})`,
+          alerted: false,
+          stateKey,
+          state: null as ProductState | null,
+        };
+      }
+    }),
+  );
 
-    if (!decision.shouldAlert) {
-      continue;
-    }
+  const lines = productResults.map((item) => item.line);
+  const alertsSent = productResults.filter((item) => item.alerted).length;
 
-    const message = buildAlertMessage({
-      productName: product.name,
-      model: product.model,
-      maxPrice: product.maxPrice,
-      offerTitle: best.title,
-      offerStore: best.store,
-      offerPrice: best.price,
-      offerUrl: best.url,
-      previousMin: decision.previousMin,
-    });
-
-    await sendTelegram(
-      env.TELEGRAM_BOT_TOKEN,
-      env.TELEGRAM_CHAT_ID,
-      message,
-    );
-    alertsSent += 1;
-  }
-
-  return { alertsSent, results };
+  return { alertsSent, results: lines };
 }
 
 export default {
