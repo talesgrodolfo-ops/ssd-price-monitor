@@ -1,5 +1,5 @@
 import { PRODUCTS } from "./config";
-import { collectOffers } from "./fetchers";
+import { crawlProduct } from "./crawler";
 import {
   buildPriceReportMessage,
   fetchPriceQuotes,
@@ -39,29 +39,31 @@ export async function runMonitor(env: Env): Promise<{
   alertsSent: number;
   results: string[];
 }> {
-  const productResults = await Promise.all(
-    PRODUCTS.map(async (product) => {
-      const stateKey = product.model;
-      try {
-        const offers = await collectOffers(product);
-        if (!offers.length) {
-          return {
-            line: `${product.name}: nenhuma oferta encontrada`,
+  const productResults: Array<{ line: string; alerted: boolean }> = [];
+  for (const product of PRODUCTS) {
+    const stateKey = product.model;
+    try {
+        const crawl = await crawlProduct(product);
+        if (!crawl.bestOffer) {
+          productResults.push({
+            line: `${product.name}: 0/${crawl.scannedCount} confirmados pelo nome`,
             alerted: false,
-          };
+          });
+          continue;
         }
 
-        const best = offers[0];
+        const best = crawl.bestOffer;
         const stored = await loadProductState(env.STATE_KV, stateKey);
         const decision = decideAlert(best.price, product.maxPrice, stored);
         const updated = nextState(best.price, stored, decision.shouldAlert);
         await saveProductState(env.STATE_KV, stateKey, updated);
 
         if (!decision.shouldAlert) {
-          return {
-            line: `${product.name}: ${formatMoney(best.price)} (${decision.reason})`,
+          productResults.push({
+            line: `${product.name}: ${formatMoney(best.price)} (${crawl.matchedCount}/${crawl.scannedCount} ok, ${decision.reason})`,
             alerted: false,
-          };
+          });
+          continue;
         }
 
         const message = buildAlertMessage({
@@ -81,19 +83,18 @@ export async function runMonitor(env: Env): Promise<{
           message,
         );
 
-        return {
-          line: `${product.name}: ${formatMoney(best.price)} (alerta enviado)`,
-          alerted: true,
-        };
-      } catch (error) {
-        const reason = error instanceof Error ? error.message : String(error);
-        return {
-          line: `${product.name}: erro (${reason})`,
-          alerted: false,
-        };
-      }
-    }),
-  );
+      productResults.push({
+        line: `${product.name}: ${formatMoney(best.price)} alerta (${crawl.matchedCount}/${crawl.scannedCount} confirmados)`,
+        alerted: true,
+      });
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      productResults.push({
+        line: `${product.name}: erro (${reason})`,
+        alerted: false,
+      });
+    }
+  }
 
   const lines = productResults.map((item) => item.line);
   const alertsSent = productResults.filter((item) => item.alerted).length;
