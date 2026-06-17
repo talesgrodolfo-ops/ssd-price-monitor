@@ -1,0 +1,34 @@
+# Monitor de preços de SSD — ajuste os valores alvo conforme seu orçamento
+
+telegram:
+  enabled: true
+
+# Alerta apenas quando o preco for um novo minimo historico e estiver dentro do alvo.
+
+products:
+  - name: "WD Green SN350 1TB"
+    model: "WDS100T3G0C"
+    max_price: 850.00
+    kabum_search: "wd sn350 1tb"
+    keywords: ["sn350", "1tb"]
+    amazon_asin: ""  # opcional: preencha com ASIN da oferta que você acompanha
+
+  - name: "Kingston NV3 1TB"
+    model: "SNV3S/1000G"
+    max_price: 900.00
+    kabum_search: "kingston nv3 1tb"
+    keywords: ["nv3", "snv3s", "1tb"]
+
+  - name: "Crucial P3 1TB"
+    model: "CT1000P3SSD8"
+    max_price: 420.00
+    kabum_search: "crucial p3 1tb"
+    keywords: ["crucial", "p3", "1tb"]
+    exclude_keywords: ["plus", "2tb", "4tb", "500gb", "480gb"]
+
+  - name: "WD Blue SN570 1TB"
+    model: "WDS100T3G0G"
+    max_price: 450.00
+    kabum_search: "wd sn570 1tb"
+    keywords: ["sn570", "1tb"]
+    exclude_keywords: ["2tb", "500gb", "480gb"]
