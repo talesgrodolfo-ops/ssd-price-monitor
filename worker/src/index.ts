@@ -1,114 +1,13 @@
-import { PRODUCTS } from "./config";
-import { collectOffers } from "./fetchers";
+import type { Env } from "./env";
 import {
-  buildAlertMessage,
-  formatMoney,
-  sendTelegram,
-} from "./telegram";
-import {
-  decideAlert,
-  nextState,
-  type ProductState,
-} from "./state";
+  handleTelegramWebhook,
+  registerTelegramWebhook,
+  runMonitor,
+  sendPriceReport,
+} from "./monitor";
+import { sendTelegram } from "./telegram";
 
-export interface Env {
-  STATE_KV: KVNamespace;
-  TELEGRAM_BOT_TOKEN: string;
-  TELEGRAM_CHAT_ID: string;
-}
-
-async function loadProductState(
-  kv: KVNamespace,
-  key: string,
-): Promise<ProductState | null> {
-  const raw = await kv.get(key);
-  if (!raw) {
-    return null;
-  }
-  return JSON.parse(raw) as ProductState;
-}
-
-async function saveProductState(
-  kv: KVNamespace,
-  key: string,
-  state: ProductState,
-): Promise<void> {
-  await kv.put(key, JSON.stringify(state));
-}
-
-export async function runMonitor(env: Env): Promise<{
-  alertsSent: number;
-  results: string[];
-}> {
-  const productResults = await Promise.all(
-    PRODUCTS.map(async (product) => {
-      const stateKey = `product:${product.model}`;
-      try {
-        const offers = await collectOffers(product);
-        if (!offers.length) {
-          return {
-            line: `${product.name}: nenhuma oferta encontrada`,
-            alerted: false,
-            stateKey,
-            state: null as ProductState | null,
-          };
-        }
-
-        const best = offers[0];
-        const stored = await loadProductState(env.STATE_KV, stateKey);
-        const decision = decideAlert(best.price, product.maxPrice, stored);
-        const updated = nextState(best.price, stored, decision.shouldAlert);
-        await saveProductState(env.STATE_KV, stateKey, updated);
-
-        if (!decision.shouldAlert) {
-          return {
-            line: `${product.name}: ${formatMoney(best.price)} (${decision.reason})`,
-            alerted: false,
-            stateKey,
-            state: updated,
-          };
-        }
-
-        const message = buildAlertMessage({
-          productName: product.name,
-          model: product.model,
-          maxPrice: product.maxPrice,
-          offerTitle: best.title,
-          offerStore: best.store,
-          offerPrice: best.price,
-          offerUrl: best.url,
-          previousMin: decision.previousMin,
-        });
-
-        await sendTelegram(
-          env.TELEGRAM_BOT_TOKEN,
-          env.TELEGRAM_CHAT_ID,
-          message,
-        );
-
-        return {
-          line: `${product.name}: ${formatMoney(best.price)} (alerta enviado)`,
-          alerted: true,
-          stateKey,
-          state: updated,
-        };
-      } catch (error) {
-        const reason = error instanceof Error ? error.message : String(error);
-        return {
-          line: `${product.name}: erro (${reason})`,
-          alerted: false,
-          stateKey,
-          state: null as ProductState | null,
-        };
-      }
-    }),
-  );
-
-  const lines = productResults.map((item) => item.line);
-  const alertsSent = productResults.filter((item) => item.alerted).length;
-
-  return { alertsSent, results: lines };
-}
+const WORKER_URL = "https://ssd-price-monitor.talesgrodolfo.workers.dev";
 
 export default {
   async scheduled(
@@ -132,6 +31,11 @@ export default {
       return Response.json(summary);
     }
 
+    if (url.pathname === "/precos") {
+      await sendPriceReport(env, env.TELEGRAM_CHAT_ID);
+      return Response.json({ ok: true });
+    }
+
     if (url.pathname === "/test") {
       await sendTelegram(
         env.TELEGRAM_BOT_TOKEN,
@@ -139,6 +43,23 @@ export default {
         "SSD Price Monitor na Cloudflare configurado com sucesso.",
       );
       return Response.json({ ok: true });
+    }
+
+    if (url.pathname === "/telegram-webhook" && request.method === "POST") {
+      return handleTelegramWebhook(request, env);
+    }
+
+    if (url.pathname === "/setup-webhook" && request.method === "POST") {
+      try {
+        const result = await registerTelegramWebhook(
+          WORKER_URL,
+          env.TELEGRAM_BOT_TOKEN,
+        );
+        return new Response(result, { status: 200 });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        return new Response(message, { status: 500 });
+      }
     }
 
     return new Response("SSD Price Monitor", { status: 200 });

@@ -33,7 +33,18 @@ Testes:
 
 - `https://<seu-worker>.workers.dev/health` — status
 - `https://<seu-worker>.workers.dev/run` — executa verificação manual
+- `https://<seu-worker>.workers.dev/precos` — envia lista de preços no Telegram
 - `https://<seu-worker>.workers.dev/test` — mensagem de teste no Telegram
+
+### Bot no Telegram (responder mensagens)
+
+Após o deploy, registre o webhook:
+
+```powershell
+curl -X POST https://ssd-price-monitor.talesgrodolfo.workers.dev/setup-webhook
+```
+
+No Telegram, envie qualquer mensagem ou `/precos` para o seu bot — ele responde com o link e preço mais barato de cada SSD monitorado.
 
 ## Uso local (Python)
 
