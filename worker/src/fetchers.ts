@@ -19,6 +19,21 @@ const KABUM_HEADERS: Record<string, string> = {
   Referer: "https://www.kabum.com.br/",
 };
 
+const FETCH_TIMEOUT_MS = 15_000;
+
+async function fetchWithTimeout(
+  url: string,
+  init: RequestInit = {},
+): Promise<Response> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 const KABUM_API =
   "https://servicespub.prod.api.aws.grupokabum.com.br/catalog/v2/products";
 
@@ -71,7 +86,7 @@ export async function searchKabum(
   url.searchParams.set("query", query);
   url.searchParams.set("page_size", String(limit));
 
-  const response = await fetch(url.toString(), { headers: KABUM_HEADERS });
+  const response = await fetchWithTimeout(url.toString(), { headers: KABUM_HEADERS });
   if (!response.ok) {
     throw new Error(`KaBuM HTTP ${response.status}`);
   }
